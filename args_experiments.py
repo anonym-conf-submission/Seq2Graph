@@ -1,5 +1,6 @@
 import argparse
 import torch
+import os
 
 
 def args_springs():
@@ -24,7 +25,7 @@ def args_springs():
     args, unknown = parser.parse_known_args()
     args.cuda = args.cuda and torch.cuda.is_available()
 
-    args.path = '/data/tsi/analyse_de_donnees/04-Data/Springs/Datasets/non_stationary/avec_overlap/multiple_trajectories/'
+    args.path = os.getcwd() + '/data/data_cmapss'
 
     args.device = torch.device('cuda' if torch.cuda.is_available() else 'cpu')
 
@@ -54,7 +55,7 @@ def args_cmapss():
     args, unknown = parser.parse_known_args()
     args.cuda = args.cuda and torch.cuda.is_available()
 
-    args.path = '/data/tsi/analyse_de_donnees/04-Data/CMAPSS/'
+    args.path = os.getcwd() + '/data/data_cmapss'
 
     args.device = torch.device('cuda' if args.cuda else 'cpu')
 
