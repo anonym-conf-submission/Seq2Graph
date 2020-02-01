@@ -1,7 +1,7 @@
-from d592151.Seq2Graph.ICML.args_experiments import *
-from d592151.Seq2Graph.ICML.models import *
-from d592151.Seq2Graph.ICML.load_data import *
-from d592151.Seq2Graph.ICML.training import *
+from args_experiments import *
+from models import *
+from load_data import *
+from training import *
 
 import matplotlib.pyplot as plt
 
