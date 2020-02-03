@@ -1,6 +1,5 @@
 import argparse
 import torch
-import os
 
 
 def args_springs():
@@ -19,13 +18,14 @@ def args_springs():
     parser.add_argument('--prediction-steps', type=int, default=1, help='Random seed.')
     parser.add_argument('--proximal-gradient', type=int, default=True, help='Use proximal gradient descent.')
     parser.add_argument('--seed', type=int, default=1234, help='Random seed.')
+    parser.add_argument('--sparsity-min', type=float, default=0.1)
     parser.add_argument('--stationary', action='store_true', default=True, help='Each time series is stationary.')
     parser.add_argument('--suffix', type=str, default='_springs10', help='Suffix for training data (e.g. "_charged".')
 
     args, unknown = parser.parse_known_args()
     args.cuda = args.cuda and torch.cuda.is_available()
 
-    args.path = os.getcwd() + '/data/data_springs10'
+    args.path = '/data/tsi/analyse_de_donnees/04-Data/Springs/Datasets/non_stationary/avec_overlap/multiple_trajectories/'
 
     args.device = torch.device('cuda' if torch.cuda.is_available() else 'cpu')
 
@@ -49,13 +49,14 @@ def args_cmapss():
     parser.add_argument('--proximal-gradient', type=int, default=True, help='Use proximal gradient descent.')
     parser.add_argument('--time_steps', type=int, default=25, help='Number of time steps per sample.')
     parser.add_argument('--seed', type=int, default=1234, help='Random seed.')
+    parser.add_argument('--sparsity-min', type=float, default=0.05)
     parser.add_argument('--stationary', action='store_true', default=True, help='Each time series is stationary.')
     parser.add_argument('--suffix', type=str, default='_cmapss_001', help='Suffix for training data (e.g. "_charged".')
 
     args, unknown = parser.parse_known_args()
     args.cuda = args.cuda and torch.cuda.is_available()
 
-    args.path = os.getcwd() + '/data/data_cmapss_001'
+    args.path = '/data/tsi/analyse_de_donnees/04-Data/CMAPSS/'
 
     args.device = torch.device('cuda' if args.cuda else 'cpu')
 

@@ -3,43 +3,33 @@ import torch
 import torch.optim as optim
 import torch.nn as nn
 import time
+import matplotlib.pyplot as plt
+import os
 
 
-def group_lasso_regularization(weight, type='group_lasso'):
+def group_lasso_regularization(weight):
+    """
+    Penalization function of input layer weight
+    :param weight: tensor of neural network input layer weights
+    :return: the penalization to be used in the loss
+    """
     return torch.sum(torch.norm(torch.norm(weight, dim=2), dim=0))
 
 
-def proximal_update(network, lam, lr, penalty):
-    '''Perform in place proximal update on first layer weight matrix.
-
-    Args:
-      network: MLP network.
-      lam: regularization parameter.
-      lr: learning rate.
-      penalty: one of group_lasso, GSGL, hierarchical.
-    '''
+def proximal_update(network, lmbda, lr):
+    """
+    Performs update of the input layer of network with proximal gradient descent
+    :param network: neural network
+    :param lmbda: penalization coefficient for the group Lasso
+    :param lr: learning rate
+    :return: in-place operation
+    """
+    
     W = network.layers[0].weight
     hidden, p, lag, _ = W.shape
-    if penalty == 'group_lasso':
-        norm = torch.norm(torch.norm(W, dim=0, keepdim=True), dim=2, keepdim=True)
-        W.data = ((W / torch.clamp(norm, min=(lr * lam * 0.1)))
-                  * torch.clamp(norm - (lr * lam), min=0.0))
-    elif penalty == 'GSGL':
-        norm = torch.norm(W, dim=0, keepdim=True)
-        W.data = ((W / torch.clamp(norm, min=(lr * lam * 0.1)))
-                  * torch.clamp(norm - (lr * lam), min=0.0))
-        norm = torch.norm(W, dim=(0, 2), keepdim=True)
-        W.data = ((W / torch.clamp(norm, min=(lr * lam * 0.1)))
-                  * torch.clamp(norm - (lr * lam), min=0.0))
-    elif penalty == 'hierarchical':
-        # Lowest indices along third axis touch most lagged values.
-        for i in range(lag):
-            norm = torch.norm(torch.norm(W[:, :, :(i + 1)], dim=2, keepdim=True), dim=0, keepdim=True)
-            W.data[:, :, :(i + 1)] = (
-                    (W.data[:, :, :(i + 1)] / torch.clamp(norm, min=(lr * lam * 0.1)))
-                    * torch.clamp(norm - (lr * lam), min=0.0))
-    else:
-        raise ValueError('unsupported penalty: %s' % penalty)
+    norm = torch.norm(torch.norm(W, dim=0, keepdim=True), dim=2, keepdim=True)
+    W.data = ((W / torch.clamp(norm, min=(lr * lmbda * 0.1)))
+              * torch.clamp(norm - (lr * lmbda), min=0.0))
 
 
 def train_causality_epoch(epoch, model, optimizer, dataloader, args, validation=False):
@@ -80,8 +70,17 @@ def train_causality_epoch(epoch, model, optimizer, dataloader, args, validation=
           'Time: {:.4f}s'.format(time.time() - t))
 
 
-def train_proximal_epoch(model, data, lr, lam, lam_ridge, penalty='group_lasso', max_iter=1):
+def train_proximal_epoch(model, data, lr, lmbda, lmbda_ridge, max_iter=1):
+    """
 
+    :param model:
+    :param data:
+    :param lr:
+    :param lmbda:
+    :param lmbda_ridge:
+    :param max_iter:
+    :return:
+    """
     x_hat = model(data[:, :, :-1])
     mse = ((x_hat - data[:, :, model.lag:]) ** 2).sum() / data.size(0)
 
@@ -90,18 +89,116 @@ def train_proximal_epoch(model, data, lr, lam, lam_ridge, penalty='group_lasso',
         R_reg += torch.sum(torch.stack([torch.norm(l.weight, p=2)
                                         for i, l in enumerate(m.layers)
                                         if type(l) != type(m.activation)]))
-    loss = mse + lam_ridge * R_reg
+    loss = mse + lmbda_ridge * R_reg
     loss.backward()
 
     for it in range(max_iter):
         for m in model.model_list:
-            proximal_update(m, lam, lr, penalty)  # proximal_update(net_copy, lam, lr, penalty)
+            proximal_update(m, lmbda, lr)  # proximal_update(net_copy, lmbda, lr, penalty)
             m.zero_grad()
 
     GL_reg = torch.sum(torch.stack([group_lasso_regularization(model.model_list[i].layers[0].weight)
                                     for i in range(len(model.model_list))]))
 
     return mse.item(), R_reg.item(), GL_reg.item()
+
+
+def group_lasso_training(model, optimizer, dataloader, args, sparsity_min=0.05, plot=False):
+    """
+    This function does the training of GL-VAR with proximal gradient under group lasso penalization
+
+    :param model: function g of the GL-VAR
+    :param optimizer: optimization module from PyTorch for training the model with respect to a loss
+    :param dataloader: loader of data samples
+    :param args: set of arguments for initialization and training of GL-VAR
+    :param sparsity_min: sparsity threshold at which we stop the proximal gradient descent training
+    :return: save weights
+    """
+    s = 0.95
+    epoch = 0
+
+    while s > sparsity_min:
+        epoch += 1
+        for batch_idx, data in enumerate(dataloader):
+            data = data[0].to(args.device)
+
+            optimizer.zero_grad()
+            mse, ridge, reg = train_proximal_epoch(model, data, args.lr,
+                                                   args.lmbd_prox, args.lmbd_ridge)
+
+            W = torch.stack([m.layers[0].weight.abs().mean(0).mean(1).mean(-1).cpu().detach()
+                             for m in model.model_list])
+            W = (W > 0).float().numpy()
+
+        c = W.mean()
+
+        if c <= s:
+            torch.save(model.state_dict(), os.getcwd() + '/weights' + args.suffix + '/'
+                       + 'g' + args.suffix + '_' + str(np.round(s, 2)) + '.pt')
+            s = np.round(s - 0.05, 2)
+
+        if epoch % 25 == 0:
+
+            print('Epoch: {:04d}'.format(epoch), 'mse: {:.5f}'.format(mse), 'ridge: {:.5f}'.format(ridge),
+                  'reg: {:.5f}'.format(reg), 'sparsity: {:.2f}'.format(1-c))
+
+            if plot:
+                plt.imshow(W, cmap='binary')
+                plt.show(block=False)
+
+    # Fine tuning of the sparse parameters
+
+    print('Fine tuning for saved weights')
+
+    all_losses, loss_train = [], []
+    model.load_state_dict(torch.load(os.getcwd() + '/weights' + args.suffix + '/' + 'g' + args.suffix + '.pt'))
+
+    for batch_idx, data in enumerate(dataloader):
+
+        data = data[0].to(args.device)
+        x_hat = model(data[:, :, :-1])
+        loss = ((x_hat - data[:, :, args.lag:]) ** 2).mean(0).mean()  # F.mse_loss(x_hat, data[:, :, args.lag:])
+        loss_train.append(loss.item())
+
+    print('Sparsity: {:.2f}, loss: {:.5f}'.format(1, np.mean(loss_train)))
+    all_losses.append(np.mean(loss_train))
+
+    for s in np.arange(0.95, 0.06, -0.05):
+        model.load_state_dict(torch.load(os.getcwd() + '/weights' + args.suffix + '/'
+                                         + 'g' + args.suffix + '_' + str(np.round(s, 2)) + '.pt'))
+
+        W_prior = torch.stack([m.layers[0].weight.squeeze(-1) for m in model.model_list])
+        adjacency = (W_prior.sum(-1).sum(1) != 0).float().unsqueeze(1).unsqueeze(-1)
+
+        if model.bias:
+            bias_prior = torch.stack([m.layers[0].bias.data for m in model.model_list]).unsqueeze(0).unsqueeze(-1)
+        else:
+            bias_prior = torch.zeros([1, args.num_atoms, model.model_list[0].layers[0].weight.shape[0], 1]).to(args.device)
+
+        w_fine_tuning = W_fine_tuning(W_prior, bias_prior).to(args.device)
+        optimizer = optim.Adam(w_fine_tuning.parameters())
+        loss = w_fine_tuning.train_epochs(100, dataloader, model, optimizer, adjacency, args)
+
+        print('Sparsity: {:.2f}, loss: {:.4f}'.format(1-s, loss))
+        all_losses.append(loss)
+
+        W_adjusted_prior = w_fine_tuning.W_ft.mul(adjacency) + W_prior
+
+        for i, m in enumerate(model.model_list):
+            m.layers[0].weight.data = W_adjusted_prior[i].unsqueeze(-1)
+
+        torch.save(model.state_dict(), os.getcwd() + '/weights' + args.suffix + '/'
+                   + 'g' + args.suffix + '_' + str(np.round(s, 2)) + '.pt')
+
+    plt.figure(figsize=(8, 2))
+    plt.plot(np.arange(0, len(all_losses)*5, 5), np.array(all_losses), 'o-')
+    if args.suffix == '_cmapss_001':
+        plt.vlines(75, min(all_losses)*0.99, max(all_losses)*1.01)
+    elif args.suffix == '_springs10':
+        plt.vlines(55, min(all_losses) * 0.99, max(all_losses) * 1.01)
+    plt.xlabel('Sparsity (%)')
+    plt.ylabel('Mean-squared error')
+    plt.show(block=False)
 
 
 class W_fine_tuning(nn.Module):
@@ -115,10 +212,10 @@ class W_fine_tuning(nn.Module):
 
     def train_epoch(self, dataloader, model, optimizer, adjacency, args):
         loss_train, reg_train = [], []
-        for batch_idx, (data, _) in enumerate(dataloader):
+        for batch_idx, data in enumerate(dataloader):
             optimizer.zero_grad()
 
-            data = data.to(args.device)
+            data = data[0].to(args.device)
 
             W = (self.W_ft.mul(adjacency) + self.w_prior).unsqueeze(0).repeat(data.size(0), 1, 1, 1, 1)
 
@@ -129,7 +226,10 @@ class W_fine_tuning(nn.Module):
                                                                                                data.size(1), -1))
                                       for i, m in enumerate(model.model_list)], dim=1)
             preds = preds + self.bias
-            preds = preds.contiguous().view(data.size(0), data.size(1), args.hidden_GC[0], -1, args.in_dim)
+            if len(args.hidden_GC) > 0:
+                preds = preds.contiguous().view(data.size(0), data.size(1), args.first_hidden, -1, args.in_dim)
+            else:
+                preds = preds.contiguous().view(data.size(0), data.size(1), 1, -1, args.in_dim)
             preds = torch.cat([m(preds[:, i], 2) for i, m in enumerate(model.model_list)], dim=1)
 
             target = data[:, :, args.lag:]
@@ -142,10 +242,16 @@ class W_fine_tuning(nn.Module):
 
         return np.mean(loss_train)
 
+    def train_epochs(self, epochs, dataloader, model, optimizer, adjacency, args):
+
+        for epoch in range(epochs):
+            loss = self.train_epoch(dataloader, model, optimizer, adjacency, args)
+
+        return loss
+
 
 def train_seq2graph_epoch(epoch, encoder, decoder, dataloader, optimizer, scheduler,
                           eta, rel_rec, rel_send, args):
-
     w_prior = torch.stack([m.layers[0].weight.squeeze(-1) for m in decoder.model_list])
     adjacency = (w_prior.sum(-1).sum(1) != 0).float().unsqueeze(1).unsqueeze(-1)
     adjacency[range(args.num_atoms), :, range(args.num_atoms), :] = 0
@@ -156,14 +262,13 @@ def train_seq2graph_epoch(epoch, encoder, decoder, dataloader, optimizer, schedu
         bias_prior = torch.zeros([1, args.num_atoms, decoder.model_list[0].layers[0].weight.shape[0], 1])
 
     loss_train, reg_train = [], []
-    for batch_idx, (data, _) in enumerate(dataloader):
+    for batch_idx, data in enumerate(dataloader):
         optimizer.zero_grad()
 
-        if args.cuda:
-            data = data.cuda()
+        data = data[0].to(args.device)
 
         w = encoder(data, rel_rec, rel_send)
-        w = w.contiguous().view(-1, args.num_atoms, args.num_atoms, args.hidden_GC[0], args.lag)
+        w = w.contiguous().view(-1, args.num_atoms, args.num_atoms, args.first_hidden, args.lag)
         w = w.permute(0, 1, 3, 2, 4).mul(adjacency.unsqueeze(0))
         w_sparse = w + w_prior.unsqueeze(0)
 
@@ -174,10 +279,15 @@ def train_seq2graph_epoch(epoch, encoder, decoder, dataloader, optimizer, schedu
                                                                                            data.size(1), -1))
                                   for i, m in enumerate(decoder.model_list)], dim=1)
         preds = preds + bias_prior
-        preds = preds.contiguous().view(data.size(0), data.size(1), args.hidden_GC[0], -1, args.in_dim)
-        preds = torch.cat([m(preds[:, i], 1) for i, m in enumerate(decoder.model_list)], dim=1)
 
-        target = data[:, :, args.lag:]
+        if len(args.hidden_GC) > 0:
+            preds = preds.contiguous().view(data.size(0), data.size(1), args.first_hidden, -1, args.in_dim)
+            preds = torch.cat([m(preds[:, i], 1) for i, m in enumerate(decoder.model_list)], dim=1)
+            target = data[:, :, args.lag:]
+        else:
+            preds = preds.squeeze()
+            target = data[:, :, args.lag:].view(data.size(0), data.size(1), -1)
+
         loss = ((preds - target) ** 2).mean(0).sum()
         reg = torch.stack([torch.norm(w - encoder.P_prior.unsqueeze(0)) for w in w]).sum() + torch.norm(encoder.P_prior)
 
@@ -190,6 +300,7 @@ def train_seq2graph_epoch(epoch, encoder, decoder, dataloader, optimizer, schedu
 
     scheduler.step()
 
-    print('Epoch: {:04d}'.format(epoch),
-          'loss: {:.5f}'.format(np.mean(loss_train)),
-          'reg: {:.5f}'.format(np.mean(reg_train)))
+    if epoch % 25 == 0:
+        print('Epoch: {:04d}'.format(epoch),
+              'loss: {:.5f}'.format(np.mean(loss_train)),
+              'reg: {:.5f}'.format(np.mean(reg_train)))

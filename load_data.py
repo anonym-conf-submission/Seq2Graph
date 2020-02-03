@@ -88,14 +88,14 @@ def create_loaders(X, y, batch_size, shuffle=True):
 def load_cmapss_data(path, batch_size=1, time_steps=25, shuffle=True):
     """
 
-    :param path:
+    :param path: directory of data
     :param batch_size: batch_size: size of the batch in dataloaders
     :param time_steps: length of the samples
     :param shuffle: shuffle the trainloader
     :return:
     """
 
-    X_cmapss = pd.read_csv(path + 'cmapss_001.txt', sep=' ', header=None, index_col=1)
+    X_cmapss = pd.read_csv(path + 'train_FD001.txt', sep=' ', header=None, index_col=1)
     X_cmapss.dropna(axis=1, inplace=True)
 
     # Variables 2, 3, 4 are the exogenous conditions
