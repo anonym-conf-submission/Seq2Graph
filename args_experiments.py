@@ -25,7 +25,7 @@ def args_springs():
     args, unknown = parser.parse_known_args()
     args.cuda = args.cuda and torch.cuda.is_available()
 
-    args.path = os.getcwd() + '/data/data_cmapss'
+    args.path = os.getcwd() + '/data/data_springs10'
 
     args.device = torch.device('cuda' if torch.cuda.is_available() else 'cpu')
 
