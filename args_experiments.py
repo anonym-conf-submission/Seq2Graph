@@ -55,7 +55,7 @@ def args_cmapss():
     args, unknown = parser.parse_known_args()
     args.cuda = args.cuda and torch.cuda.is_available()
 
-    args.path = os.getcwd() + '/data/data_cmapss'
+    args.path = os.getcwd() + '/data/data_cmapss_001'
 
     args.device = torch.device('cuda' if args.cuda else 'cpu')
 
