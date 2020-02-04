@@ -103,7 +103,7 @@ def train_proximal_epoch(model, data, lr, lmbda, lmbda_ridge, max_iter=1):
     return mse.item(), R_reg.item(), GL_reg.item()
 
 
-def group_lasso_training(model, optimizer, dataloader, args, sparsity_min=0.05, plot=False):
+def group_lasso_training(model, optimizer, dataloader, args, plot=False):
     """
     This function does the training of GL-VAR with proximal gradient under group lasso penalization
 
@@ -111,13 +111,12 @@ def group_lasso_training(model, optimizer, dataloader, args, sparsity_min=0.05, 
     :param optimizer: optimization module from PyTorch for training the model with respect to a loss
     :param dataloader: loader of data samples
     :param args: set of arguments for initialization and training of GL-VAR
-    :param sparsity_min: sparsity threshold at which we stop the proximal gradient descent training
     :return: save weights
     """
     s = 0.95
     epoch = 0
 
-    while s > sparsity_min:
+    while s > args.sparsity_min:
         epoch += 1
         for batch_idx, data in enumerate(dataloader):
             data = data[0].to(args.device)
@@ -160,10 +159,10 @@ def group_lasso_training(model, optimizer, dataloader, args, sparsity_min=0.05, 
         loss = ((x_hat - data[:, :, args.lag:]) ** 2).mean(0).mean()  # F.mse_loss(x_hat, data[:, :, args.lag:])
         loss_train.append(loss.item())
 
-    print('Sparsity: {:.2f}, loss: {:.5f}'.format(1, np.mean(loss_train)))
+    print('Sparsity: {:.2f}, loss: {:.5f}'.format(0.0, np.mean(loss_train)))
     all_losses.append(np.mean(loss_train))
 
-    for s in np.arange(0.95, 0.06, -0.05):
+    for s in np.arange(0.95, args.sparsity_min, -0.05):
         model.load_state_dict(torch.load(os.getcwd() + '/weights' + args.suffix + '/'
                                          + 'g' + args.suffix + '_' + str(np.round(s, 2)) + '.pt'))
 
@@ -254,7 +253,8 @@ def train_seq2graph_epoch(epoch, encoder, decoder, dataloader, optimizer, schedu
                           eta, rel_rec, rel_send, args):
     w_prior = torch.stack([m.layers[0].weight.squeeze(-1) for m in decoder.model_list])
     adjacency = (w_prior.sum(-1).sum(1) != 0).float().unsqueeze(1).unsqueeze(-1)
-    adjacency[range(args.num_atoms), :, range(args.num_atoms), :] = 0
+    if args.self_loops is False:
+        adjacency[range(args.num_atoms), :, range(args.num_atoms), :] = 0
 
     if decoder.bias:
         bias_prior = torch.stack([m.layers[0].bias.data for m in decoder.model_list]).unsqueeze(0).unsqueeze(-1)
